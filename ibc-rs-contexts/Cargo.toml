@@ -1,0 +1,14 @@
+[package]
+name = "ibc-rs-contexts"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.92"
+bytes = "1.8.0"
+ibc = "0.55.1"
+ibc-proto = "0.51.0"
+ibc-query = "0.55.1"
+ics23 = { version = "0.12.0", features = ["serde"] }
+prost = "0.13.3"
+tokio = { version = "1.41.0", features = ["full"] }

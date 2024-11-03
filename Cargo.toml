@@ -1,0 +1,2 @@
+[workspace]
+members = [ "ibc-rs-contexts","relayer"]
