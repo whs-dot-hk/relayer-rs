@@ -1,5 +1,6 @@
 use anyhow::Context;
 use prost::Message;
+use std::str::FromStr;
 
 use ibc::clients::tendermint::client_state::ClientState as TmClientState;
 use ibc::clients::tendermint::consensus_state::ConsensusState as TmConsensusState;
@@ -73,6 +74,7 @@ impl TryFrom<ibc::primitives::proto::Any> for AnyConsensusState {
 
 impl TryFrom<AnyConsensusState> for ibc::clients::tendermint::types::ConsensusState {
     type Error = ibc::core::host::types::error::DecodingError;
+
     fn try_from(value: AnyConsensusState) -> Result<Self, Self::Error> {
         match value {
             AnyConsensusState::Tendermint(c) => Ok(c.inner().clone()),
@@ -445,15 +447,6 @@ impl ibc_query::core::context::QueryContext for Ibc {
     > {
         unimplemented!()
     }
-    fn packet_commitments(
-        &self,
-        _channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
-    ) -> Result<
-        Vec<ibc::core::channel::types::packet::PacketState>,
-        ibc::core::host::types::error::HostError,
-    > {
-        unimplemented!()
-    }
     fn packet_acknowledgements(
         &self,
         _channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
@@ -484,4 +477,92 @@ impl ibc_query::core::context::QueryContext for Ibc {
     > {
         unimplemented!()
     }
+    fn packet_commitments(
+        &self,
+        channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
+    ) -> Result<
+        Vec<ibc::core::channel::types::packet::PacketState>,
+        ibc::core::host::types::error::HostError,
+    > {
+        fn get_commitments(
+            commitments: anyhow::Result<Vec<ibc_proto::ibc::core::channel::v1::PacketState>>,
+        ) -> anyhow::Result<Vec<ibc::core::channel::types::packet::PacketState>> {
+            let mut v: Vec<ibc::core::channel::types::packet::PacketState> = Vec::new();
+            for c in commitments? {
+                v.push(ibc::core::channel::types::packet::PacketState {
+                    port_id: ibc::core::host::types::identifiers::PortId::new(c.port_id.clone())?,
+                    chan_id: ibc::core::host::types::identifiers::ChannelId::from_str(
+                        &c.channel_id,
+                    )?,
+                    seq: ibc::core::host::types::identifiers::Sequence::from(c.sequence),
+                    data: c.data.clone(),
+                })
+            }
+            Ok(v)
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let commitments = rt.block_on(async {
+            packet_commitments(
+                &self.grpc_addr,
+                channel_end_path.0.as_str(),
+                channel_end_path.1.as_str(),
+            )
+            .await
+        });
+        get_commitments(commitments)
+            .map_err(ibc::core::host::types::error::HostError::invalid_state)
+    }
+}
+
+fn default_page_request() -> ibc_proto::cosmos::base::query::v1beta1::PageRequest {
+    ibc_proto::cosmos::base::query::v1beta1::PageRequest {
+        count_total: false,
+        key: b"".to_vec(),
+        limit: 1000,
+        offset: 0,
+        reverse: false,
+    }
+}
+
+async fn packet_commitments(
+    grpc_addr: &str,
+    port_id: &str,
+    channel_id: &str,
+) -> anyhow::Result<Vec<ibc_proto::ibc::core::channel::v1::PacketState>> {
+    fn get_next_key(
+        pagination: Option<&ibc_proto::cosmos::base::query::v1beta1::PageResponse>,
+    ) -> Option<Vec<u8>> {
+        Some(pagination?.next_key.clone())
+    }
+    let mut pagination = Some(default_page_request());
+    let mut commitments: Vec<ibc_proto::ibc::core::channel::v1::PacketState> = Vec::new();
+    loop {
+        let response = ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+            grpc_addr.to_string(),
+        )
+        .await?
+        .packet_commitments(
+            ibc_proto::ibc::core::channel::v1::QueryPacketCommitmentsRequest {
+                port_id: port_id.to_string(),
+                channel_id: channel_id.to_string(),
+                pagination: pagination.clone(),
+            },
+        )
+        .await?;
+        commitments.extend(response.get_ref().commitments.clone());
+        let next_key = get_next_key(response.get_ref().pagination.as_ref());
+        if let Some(next_key) = next_key {
+            if next_key.is_empty() {
+                break;
+            }
+            if let Some(pagination) = &mut pagination {
+                pagination.key = next_key;
+            }
+        } else {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    Ok(commitments)
 }
