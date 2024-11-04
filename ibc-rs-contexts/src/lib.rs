@@ -2,6 +2,7 @@ use anyhow::Context;
 use prost::Message;
 
 pub struct Ibc {
+    chain_id: ibc::core::host::types::identifiers::ChainId,
     grpc_addr: String,
 }
 
@@ -30,10 +31,7 @@ async fn abci_query(
             ibc_proto::cosmos::base::tendermint::v1beta1::AbciQueryRequest {
                 data: path.clone().into_bytes(),
                 path: ibc::cosmos_host::IBC_QUERY_PATH.to_string(),
-                height: height
-                    .revision_height()
-                    .try_into()
-                    .context("no revision height")?,
+                height: height.revision_height().try_into()?,
                 prove: true,
             },
         )
@@ -57,4 +55,38 @@ fn get_merkle_proof(
         ))?);
     }
     Ok(ibc_proto::ibc::core::commitment::v1::MerkleProof { proofs })
+}
+
+impl Ibc {
+    fn host_height(
+        &self,
+    ) -> Result<ibc::core::client::types::Height, ibc::core::host::types::error::HostError> {
+        fn get_height(
+            chain_id: &ibc::core::host::types::identifiers::ChainId,
+            height: anyhow::Result<i64>,
+        ) -> anyhow::Result<ibc::core::client::types::Height> {
+            Ok(ibc::core::client::types::Height::new(
+                chain_id.revision_number(),
+                height?.try_into()?,
+            )?)
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let height = rt.block_on(async { get_latest_block(&self.grpc_addr).await });
+        get_height(&self.chain_id, height)
+            .map_err(ibc::core::host::types::error::HostError::invalid_state)
+    }
+}
+
+async fn get_latest_block(grpc_addr: &str) -> anyhow::Result<i64> {
+    fn get_height(block: Option<&tendermint_proto::v0_38::types::Block>) -> Option<i64> {
+        Some(block?.header.as_ref()?.height)
+    }
+    use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{
+        service_client::ServiceClient, GetLatestBlockRequest,
+    };
+    let response = ServiceClient::connect(grpc_addr.to_string())
+        .await?
+        .get_latest_block(GetLatestBlockRequest {})
+        .await?;
+    get_height(response.get_ref().block.as_ref()).context("no height")
 }
