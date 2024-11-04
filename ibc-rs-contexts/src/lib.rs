@@ -388,3 +388,100 @@ impl ibc::core::client::context::ExtClientValidationContext for Ibc {
         unimplemented!()
     }
 }
+
+impl ibc_query::core::context::QueryContext for Ibc {
+    fn client_states(
+        &self,
+    ) -> Result<
+        Vec<(
+            ibc::core::host::types::identifiers::ClientId,
+            ibc::core::host::ClientStateRef<Self>,
+        )>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn consensus_states(
+        &self,
+        _client_id: &ibc::core::host::types::identifiers::ClientId,
+    ) -> Result<
+        Vec<(
+            ibc::core::client::types::Height,
+            ibc::core::host::ConsensusStateRef<Self>,
+        )>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn consensus_state_heights(
+        &self,
+        _client_id: &ibc::core::host::types::identifiers::ClientId,
+    ) -> Result<Vec<ibc::core::client::types::Height>, ibc::core::host::types::error::HostError>
+    {
+        unimplemented!()
+    }
+    fn connection_ends(
+        &self,
+    ) -> Result<
+        Vec<ibc::core::connection::types::IdentifiedConnectionEnd>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn client_connection_ends(
+        &self,
+        _client_id: &ibc::core::host::types::identifiers::ClientId,
+    ) -> Result<
+        Vec<ibc::core::host::types::identifiers::ConnectionId>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn channel_ends(
+        &self,
+    ) -> Result<
+        Vec<ibc::core::channel::types::channel::IdentifiedChannelEnd>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn packet_commitments(
+        &self,
+        _channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
+    ) -> Result<
+        Vec<ibc::core::channel::types::packet::PacketState>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn packet_acknowledgements(
+        &self,
+        _channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
+        _sequences: impl ExactSizeIterator<Item = ibc::core::host::types::identifiers::Sequence>,
+    ) -> Result<
+        Vec<ibc::core::channel::types::packet::PacketState>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn unreceived_packets(
+        &self,
+        _channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
+        _sequences: impl ExactSizeIterator<Item = ibc::core::host::types::identifiers::Sequence>,
+    ) -> Result<
+        Vec<ibc::core::host::types::identifiers::Sequence>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+    fn unreceived_acks(
+        &self,
+        _channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
+        _sequences: impl ExactSizeIterator<Item = ibc::core::host::types::identifiers::Sequence>,
+    ) -> Result<
+        Vec<ibc::core::host::types::identifiers::Sequence>,
+        ibc::core::host::types::error::HostError,
+    > {
+        unimplemented!()
+    }
+}
