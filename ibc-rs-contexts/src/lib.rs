@@ -272,17 +272,21 @@ impl ibc::core::host::ValidationContext for Ibc {
 }
 
 async fn get_latest_block(grpc_addr: &str) -> anyhow::Result<i64> {
-    fn get_height(block: Option<&tendermint_proto::v0_38::types::Block>) -> Option<i64> {
-        Some(block?.header.as_ref()?.height)
+    fn get_height(block: &tendermint_proto::v0_38::types::Block) -> Option<i64> {
+        Some(block.header.as_ref()?.height)
     }
     use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{
         service_client::ServiceClient, GetLatestBlockRequest,
     };
-    let response = ServiceClient::connect(grpc_addr.to_string())
+    ServiceClient::connect(grpc_addr.to_string())
         .await?
         .get_latest_block(GetLatestBlockRequest {})
-        .await?;
-    get_height(response.get_ref().block.as_ref()).context("no height")
+        .await?
+        .get_ref()
+        .block
+        .as_ref()
+        .and_then(get_height)
+        .context("no height")
 }
 
 impl ibc::core::client::context::ClientValidationContext for Ibc {
