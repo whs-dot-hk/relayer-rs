@@ -256,23 +256,24 @@ impl ibc::core::host::ValidationContext for Ibc {
         &self,
     ) -> Result<ibc::core::client::types::Height, ibc::core::host::types::error::HostError> {
         fn get_height(
-            chain_id: &ibc::core::host::types::identifiers::ChainId,
-            height: anyhow::Result<i64>,
+            revision_number: u64,
+            height: i64,
         ) -> anyhow::Result<ibc::core::client::types::Height> {
             Ok(ibc::core::client::types::Height::new(
-                chain_id.revision_number(),
-                height?.try_into()?,
+                revision_number,
+                height.try_into()?,
             )?)
         }
         let rt = tokio::runtime::Runtime::new().unwrap();
         let height = rt.block_on(async { get_latest_block(&self.grpc_addr).await });
-        get_height(&self.chain_id, height)
+        height
+            .and_then(|v| get_height(self.chain_id.revision_number(), v))
             .map_err(ibc::core::host::types::error::HostError::invalid_state)
     }
 }
 
 async fn get_latest_block(grpc_addr: &str) -> anyhow::Result<i64> {
-    fn get_height(block: &tendermint_proto::v0_38::types::Block) -> Option<i64> {
+    fn get_height(block: &ibc_proto::cosmos::base::tendermint::v1beta1::Block) -> Option<i64> {
         Some(block.header.as_ref()?.height)
     }
     use cosmos_sdk_proto::cosmos::base::tendermint::v1beta1::{
@@ -283,7 +284,7 @@ async fn get_latest_block(grpc_addr: &str) -> anyhow::Result<i64> {
         .get_latest_block(GetLatestBlockRequest {})
         .await?
         .get_ref()
-        .block
+        .sdk_block
         .as_ref()
         .and_then(get_height)
         .context("no height")
@@ -485,14 +486,31 @@ impl ibc_query::core::context::QueryContext for Ibc {
         &self,
         channel_end_path: &ibc::core::host::types::path::ChannelEndPath,
     ) -> Result<
-        Vec<ibc::core::channel::types::packet::PacketState>,
+        (
+            Vec<ibc::core::channel::types::packet::PacketState>,
+            Option<ibc::core::client::types::Height>,
+        ),
         ibc::core::host::types::error::HostError,
     > {
+        fn get_height(
+            height: ibc_proto::ibc::core::client::v1::Height,
+        ) -> anyhow::Result<ibc::core::client::types::Height> {
+            Ok(ibc::core::client::types::Height::new(
+                height.revision_number,
+                height.revision_height,
+            )?)
+        }
         fn get_commitments(
-            commitments: anyhow::Result<Vec<ibc_proto::ibc::core::channel::v1::PacketState>>,
-        ) -> anyhow::Result<Vec<ibc::core::channel::types::packet::PacketState>> {
+            commitments: (
+                Vec<ibc_proto::ibc::core::channel::v1::PacketState>,
+                Option<ibc_proto::ibc::core::client::v1::Height>,
+            ),
+        ) -> anyhow::Result<(
+            Vec<ibc::core::channel::types::packet::PacketState>,
+            Option<ibc::core::client::types::Height>,
+        )> {
             let mut v: Vec<ibc::core::channel::types::packet::PacketState> = Vec::new();
-            for c in commitments? {
+            for c in commitments.0 {
                 v.push(ibc::core::channel::types::packet::PacketState {
                     port_id: ibc::core::host::types::identifiers::PortId::new(c.port_id.clone())?,
                     chan_id: ibc::core::host::types::identifiers::ChannelId::from_str(
@@ -502,7 +520,8 @@ impl ibc_query::core::context::QueryContext for Ibc {
                     data: c.data.clone(),
                 })
             }
-            Ok(v)
+            let h = commitments.1.and_then(|v| get_height(v).ok());
+            Ok((v, h))
         }
         let rt = tokio::runtime::Runtime::new().unwrap();
         let commitments = rt.block_on(async {
@@ -513,7 +532,8 @@ impl ibc_query::core::context::QueryContext for Ibc {
             )
             .await
         });
-        get_commitments(commitments)
+        commitments
+            .and_then(get_commitments)
             .map_err(ibc::core::host::types::error::HostError::invalid_state)
     }
 }
@@ -532,9 +552,13 @@ async fn packet_commitments(
     grpc_addr: &str,
     port_id: &str,
     channel_id: &str,
-) -> anyhow::Result<Vec<ibc_proto::ibc::core::channel::v1::PacketState>> {
+) -> anyhow::Result<(
+    Vec<ibc_proto::ibc::core::channel::v1::PacketState>,
+    Option<ibc_proto::ibc::core::client::v1::Height>,
+)> {
     let mut pagination = Some(default_page_request());
     let mut commitments: Vec<ibc_proto::ibc::core::channel::v1::PacketState> = Vec::new();
+    let height = std::cell::OnceCell::new();
     loop {
         let response = ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
             grpc_addr.to_string(),
@@ -549,6 +573,9 @@ async fn packet_commitments(
         )
         .await?;
         commitments.extend(response.get_ref().commitments.clone());
+        if let Some(h) = response.get_ref().height {
+            height.get_or_init(|| h);
+        }
         let next_key = response
             .get_ref()
             .pagination
@@ -566,5 +593,5 @@ async fn packet_commitments(
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    Ok(commitments)
+    Ok((commitments, height.get().cloned()))
 }
