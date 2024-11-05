@@ -529,11 +529,6 @@ async fn packet_commitments(
     port_id: &str,
     channel_id: &str,
 ) -> anyhow::Result<Vec<ibc_proto::ibc::core::channel::v1::PacketState>> {
-    fn get_next_key(
-        pagination: Option<&ibc_proto::cosmos::base::query::v1beta1::PageResponse>,
-    ) -> Option<Vec<u8>> {
-        Some(pagination?.next_key.clone())
-    }
     let mut pagination = Some(default_page_request());
     let mut commitments: Vec<ibc_proto::ibc::core::channel::v1::PacketState> = Vec::new();
     loop {
@@ -550,7 +545,11 @@ async fn packet_commitments(
         )
         .await?;
         commitments.extend(response.get_ref().commitments.clone());
-        let next_key = get_next_key(response.get_ref().pagination.as_ref());
+        let next_key = response
+            .get_ref()
+            .pagination
+            .as_ref()
+            .map(|v| v.next_key.clone());
         if let Some(next_key) = next_key {
             if next_key.is_empty() {
                 break;
@@ -561,7 +560,6 @@ async fn packet_commitments(
         } else {
             break;
         }
-
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     Ok(commitments)
